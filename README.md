@@ -14,5 +14,8 @@ python src/main.py
 
 - `W` `A` `S` `D` to move
 - `Q` to quit
+- `U` to use power up
 
-Reach the exit `E` and avoid or defeat monsters `M`.
+Reach the exit `E` and avoid or defeat monsters `M` and `X`.
+- `+` is health
+- `P` is power up
