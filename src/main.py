@@ -1,6 +1,7 @@
 TILE_SIZE = 2  # Each tile is TILE_SIZE x TILE_SIZE block
 import os
 import random
+import math
 from dataclasses import dataclass
 
 
@@ -12,6 +13,13 @@ PLAYER = "@"
 MONSTER = "M"
 INVULN_MONSTER = "X"
 HEALTH = "+"
+SPIKE = "▲"
+
+def place_spikes(grid: list[list[str]], count: int, forbidden: set[tuple[int, int]]):
+    for _ in range(count):
+        r, c = random_floor_tile(grid, forbidden)
+        grid[r][c] = SPIKE
+        forbidden.add((r, c))
 
 DIRECTIONS = {
     "w": (-1, 0),
@@ -167,6 +175,8 @@ def render(grid: list[list[str]], player: Actor, monsters: list[Actor]) -> str:
             return "\033[31;1mX\033[0m"
         if char == HEALTH:
             return "\033[32m+\033[0m"
+        if char == SPIKE:
+            return "\033[90m▲\033[0m"  # Gray
         if char == EXIT:
             return "\033[34mE\033[0m"
         if char == 'P':
@@ -249,6 +259,8 @@ def generate_room(player: Actor, room: int, difficulty: str) -> tuple[list[list[
     forbidden.update((m.row, m.col) for m in monsters)
     if health_count > 0:
         place_health_pickups(grid, health_count, forbidden)
+    spike_count = max(2, monster_count // 2)
+    place_spikes(grid, spike_count, forbidden)
     powerup_count = 0
     if difficulty in ("e", "m"):
         powerup_count = 1
@@ -308,10 +320,25 @@ def main() -> None:
         show_status()
 
 
+
         # Health pickup
         if grid[player.row][player.col] == HEALTH:
             player.hp += 2
             grid[player.row][player.col] = FLOOR
+
+        # Spike trap: instant death
+        if grid[player.row][player.col] == SPIKE:
+            show_status()
+            print("You stepped on a spike trap! Game over.")
+            print(f"Final Score: {score}")
+            print("=================")
+            while True:
+                choice = input("Press R to restart or Q to quit: ").strip().lower()
+                if choice == "q":
+                    return
+                if choice == "r":
+                    main()
+                    return
 
         if (player.row, player.col) == exit_pos:
             room += 1
@@ -332,6 +359,14 @@ def main() -> None:
 
 
         move_seq = input(f"Enter up to {allowed_moves} actions (WASD to move, F to attack, U to use power-up, Q to quit, R to restart): ").strip().lower()
+        # Cheat code: 56840(powerupname)
+        if move_seq.startswith("56840"):
+            cheat_power = move_seq[5:]
+            valid_powers = {"time_stop", "invulnerable/5hp", "explosive"}
+            if cheat_power in valid_powers:
+                player.power_up = cheat_power
+                print(f"Cheat activated: {cheat_power} power-up granted!")
+                continue
         if "q" in move_seq:
             print("Goodbye.")
             break
@@ -342,67 +377,101 @@ def main() -> None:
         i = 0
         powerup_used_this_turn = False
         while i < len(move_seq) and i < move_limit:
-            move_limit = allowed_moves
-            i = 0
-            powerup_used_this_turn = False
-            # Prediction attack flag
-            player.predicted_attack = False
-            while i < len(move_seq) and i < move_limit:
-                move = move_seq[i]
-                # Health pickup
-                if grid[player.row][player.col] == HEALTH:
-                    player.hp += 2
+            move = move_seq[i]
+            # Health pickup
+            if grid[player.row][player.col] == HEALTH:
+                player.hp += 2
+                grid[player.row][player.col] = FLOOR
+            # Spike trap: instant death unless invulnerable (slot or active)
+            if grid[player.row][player.col] == SPIKE:
+                if getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable' or player.power_up == 'invulnerable/5hp':
                     grid[player.row][player.col] = FLOOR
-                # Power-up pickup (placeholder: 'P' tile)
-                if grid[player.row][player.col] == 'P':
-                    if player.power_up is None:
-                        # Randomly choose between time stop and invulnerable
-                        if random.random() < 0.5:
-                            player.power_up = 'time_stop'
-                        else:
-                            player.power_up = 'invulnerable/5hp'
-                    grid[player.row][player.col] = FLOOR
-                show_status()
-                if (player.row, player.col) == exit_pos:
-                    room += 1
-                    grid, exit_pos, monsters = generate_room(player, room, diff)
-                    break
-                if player.hp <= 0:
-                    print("You were defeated.")
-                    return
-                if move == "u":
-                    if player.power_up and not powerup_used_this_turn:
-                        if player.power_up == 'time_stop':
-                            move_limit += 200
-                        elif player.power_up == 'invulnerable/5hp':
-                            player.invulnerable = True
-                            player.hp += 5
+                    # Remove invulnerability from slot or active
+                    if getattr(player, 'invulnerable', False):
+                        player.invulnerable = False
+                    if player.power_up == 'invulnerable' or player.power_up == 'invulnerable/5hp':
                         player.power_up = None
-                        powerup_used_this_turn = True
-                        show_status()
-                    i += 1
-                    continue
-                if move == "f":
-                    target = find_adjacent_monster(player, monsters)
-                    if target is not None:
-                        if target.hp != -1:
-                            target.hp -= 1
-                            if target.hp == 0:
-                                score += 1
-                        player.predicted_attack = False
+                    print("You stepped on a spike, but your invulnerability saved you! The spike is destroyed.")
+                else:
+                    show_status()
+                    print("You stepped on a spike trap! Game over.")
+                    print(f"Final Score: {score}")
+                    print("=================")
+                    while True:
+                        choice = input("Press R to restart or Q to quit: ").strip().lower()
+                        if choice == "q":
+                            return
+                        if choice == "r":
+                            main()
+                            return
+            # Power-up pickup (placeholder: 'P' tile)
+            if grid[player.row][player.col] == 'P':
+                if player.power_up is None:
+                    # Randomly choose between time stop, invulnerable, and explosive
+                    roll = random.random()
+                    if roll < 1/3:
+                        player.power_up = 'time_stop'
+                    elif roll < 2/3:
+                        player.power_up = 'invulnerable/5hp'
                     else:
-                        # Set prediction flag if no monster is adjacent
-                        player.predicted_attack = True
-                    monsters = remove_dead(monsters)
-                    i += 1
-                    continue
-                if move in DIRECTIONS:
-                    dr, dc = DIRECTIONS[move]
-                    try_move(player, dr, dc, grid)
-                    i += 1
-                    continue
-                # Invalid input is ignored
+                        player.power_up = 'explosive'
+                grid[player.row][player.col] = FLOOR
+            show_status()
+            if (player.row, player.col) == exit_pos:
+                room += 1
+                grid, exit_pos, monsters = generate_room(player, room, diff)
+                break
+            if player.hp <= 0:
+                print("You were defeated.")
+                return
+            if move == "u":
+                if player.power_up and not powerup_used_this_turn:
+                    if player.power_up == 'time_stop':
+                        move_limit += 200
+                    elif player.power_up == 'invulnerable/5hp':
+                        player.invulnerable = True
+                        player.hp += 5
+                    elif player.power_up == 'explosive':
+                        # Set all tiles in a radius-4 circle to FLOOR, kill monsters, give points
+                        radius = 4
+                        killed = 0
+                        for rr in range(max(1, player.row-radius), min(len(grid)-1, player.row+radius+1)):
+                            for cc in range(max(1, player.col-radius), min(len(grid[0])-1, player.col+radius+1)):
+                                if math.sqrt((rr-player.row)**2 + (cc-player.col)**2) <= radius:
+                                    if grid[rr][cc] != EXIT:
+                                        grid[rr][cc] = FLOOR
+                        # Kill monsters in radius
+                        for m in monsters:
+                            if m.hp > 0 and math.sqrt((m.row-player.row)**2 + (m.col-player.col)**2) <= radius:
+                                m.hp = 0
+                                killed += 1
+                        score += killed
+                    player.power_up = None
+                    powerup_used_this_turn = True
+                    show_status()
                 i += 1
+                continue
+            if move == "f":
+                target = find_adjacent_monster(player, monsters)
+                if target is not None:
+                    if target.hp != -1:
+                        target.hp -= 1
+                        if target.hp == 0:
+                            score += 1
+                    player.predicted_attack = False
+                else:
+                    # Set prediction flag if no monster is adjacent
+                    player.predicted_attack = True
+                monsters = remove_dead(monsters)
+                i += 1
+                continue
+            if move in DIRECTIONS:
+                dr, dc = DIRECTIONS[move]
+                try_move(player, dr, dc, grid)
+                i += 1
+                continue
+            # Invalid input is ignored
+            i += 1
         for monster in monsters:
             monster.is_monster = True
             monster.monster_list = monsters
