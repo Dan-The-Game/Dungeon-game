@@ -226,16 +226,22 @@ def spawn_monsters(
 
 def render(grid: list[list[str]], player: Actor, monsters: list[Actor], spikes: list) -> str:
     temp = [row[:] for row in grid]
+    # Place monsters
     for monster in monsters:
         if monster.hp > 0 or monster.hp == -1:
             if monster.hp == -1:
                 temp[monster.row][monster.col] = INVULN_MONSTER
             else:
                 temp[monster.row][monster.col] = MONSTER
-    # Place spikes (dangerous or safe)
-    for s in spikes:
-        temp[s.row][s.col] = SPIKE_DANGEROUS if s.is_dangerous() else SPIKE_SAFE
+    # Place player
     temp[player.row][player.col] = PLAYER
+    # Place spikes (dangerous or safe), but only if tile is not occupied by something else
+    for s in spikes:
+        r, c = s.row, s.col
+        spike_char = SPIKE_DANGEROUS if s.is_dangerous() else SPIKE_SAFE
+        # Only render spike if tile is not player, monster, health, shooter, arrow, exit, or powerup
+        if temp[r][c] in (FLOOR, WALL):
+            temp[r][c] = spike_char
 
     # Color mapping
     def colorize(char):
@@ -521,11 +527,19 @@ def main() -> None:
                         m.hp = 0
                 # Insta-kill player if present, unless invulnerable
                 if player.row == nr and player.col == nc:
-                    if not (getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable/5hp'):
+                    if getattr(player, 'invulnerable', False):
+                        pass
+                    elif player.power_up == 'invulnerable/5hp':
+                        player.power_up = None
+                    else:
                         player.hp = 0
                 # Crossing path detection: if player moved to where arrow was, and arrow moves to where player was
                 if (nr, nc) == player_prev and (player.row, player.col) == (r, c):
-                    if not (getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable/5hp'):
+                    if getattr(player, 'invulnerable', False):
+                        pass
+                    elif player.power_up == 'invulnerable/5hp':
+                        player.power_up = None
+                    else:
                         player.hp = 0
                 # Arrow moves to next tile
                 if grid[nr][nc] == FLOOR or grid[nr][nc] in arrow_dirs:
@@ -541,7 +555,11 @@ def main() -> None:
             if m.hp > 0 and grid[m.row][m.col] in arrow_dirs:
                 m.hp = 0
         if grid[player.row][player.col] in arrow_dirs:
-            if not (getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable/5hp'):
+            if getattr(player, 'invulnerable', False):
+                pass
+            elif player.power_up == 'invulnerable/5hp':
+                player.power_up = None
+            else:
                 player.hp = 0
 
         # Insta-kill if player or monster is standing on an arrow after all arrows move
