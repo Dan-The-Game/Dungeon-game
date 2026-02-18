@@ -1,4 +1,8 @@
 SHOOTER = "#"
+ARROW_UP = "↑"
+ARROW_DOWN = "↓"
+ARROW_RIGHT = "→"
+ARROW_LEFT = "←"
 TILE_SIZE = 2  # Each tile is TILE_SIZE x TILE_SIZE block
 import os
 import random
@@ -220,6 +224,14 @@ def render(grid: list[list[str]], player: Actor, monsters: list[Actor], spikes: 
             return "\033[37m_\033[0m"  # White underscore
         if char == SHOOTER:
             return "\033[37m#\033[0m"  # White shooter
+        if char == ARROW_UP:
+            return "\033[37m↑\033[0m"
+        if char == ARROW_DOWN:
+            return "\033[37m↓\033[0m"
+        if char == ARROW_RIGHT:
+            return "\033[37m→\033[0m"
+        if char == ARROW_LEFT:
+            return "\033[37m←\033[0m"
         if char == EXIT:
             return "\033[34mE\033[0m"
         if char == 'P':
@@ -359,6 +371,28 @@ def main() -> None:
     grid, exit_pos, monsters, spikes = generate_room(player, room, diff)
 
     while True:
+        # Move arrows before rendering
+        arrow_dirs = {
+            ARROW_UP: (-1, 0),
+            ARROW_DOWN: (1, 0),
+            ARROW_LEFT: (0, -1),
+            ARROW_RIGHT: (0, 1),
+        }
+        arrows_to_move = []
+        for r in range(len(grid)):
+            for c in range(len(grid[0])):
+                if grid[r][c] in arrow_dirs:
+                    arrows_to_move.append((r, c, grid[r][c]))
+        for r, c, arrow in arrows_to_move:
+            dr, dc = arrow_dirs[arrow]
+            nr, nc = r + dr, c + dc
+            # Only move if in bounds and next tile is FLOOR
+            if 0 <= nr < len(grid) and 0 <= nc < len(grid[0]) and grid[nr][nc] == FLOOR:
+                grid[nr][nc] = arrow
+                grid[r][c] = FLOOR
+            else:
+                grid[r][c] = FLOOR
+
         clear_screen()
         print(render(grid, player, monsters, spikes))
         print()
