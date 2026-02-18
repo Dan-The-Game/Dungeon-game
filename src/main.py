@@ -477,12 +477,14 @@ def main() -> None:
                 for m in monsters:
                     if m.row == nr and m.col == nc and m.hp > 0:
                         m.hp = 0
-                # Insta-kill player if present
+                # Insta-kill player if present, unless invulnerable
                 if player.row == nr and player.col == nc:
-                    player.hp = 0
+                    if not (getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable/5hp'):
+                        player.hp = 0
                 # Crossing path detection: if player moved to where arrow was, and arrow moves to where player was
                 if (nr, nc) == player_prev and (player.row, player.col) == (r, c):
-                    player.hp = 0
+                    if not (getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable/5hp'):
+                        player.hp = 0
                 if grid[nr][nc] == FLOOR:
                     grid[nr][nc] = arrow
                     grid[r][c] = FLOOR
@@ -496,7 +498,8 @@ def main() -> None:
             if m.hp > 0 and grid[m.row][m.col] in arrow_dirs:
                 m.hp = 0
         if grid[player.row][player.col] in arrow_dirs:
-            player.hp = 0
+            if not (getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable/5hp'):
+                player.hp = 0
 
         clear_screen()
         print(render(grid, player, monsters, spikes))
