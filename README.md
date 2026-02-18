@@ -1,4 +1,3 @@
-
 # ASCII Dungeon Game
 
 A feature-rich ASCII art, turn-based dungeon crawler in Python.
@@ -37,7 +36,7 @@ You can enter up to 3 actions per turn (more if you chain monster kills with com
 	- `▲`: Dangerous spike trap (damages/kills if stepped on when active)
 	- `_`: Safe spike trap (inactive)
 	- `#`: Shooter tile (spawns arrows in 4 directions on a timer)
-	- `↑`, `↓`, `→`, `←`: Arrows
+	- `→`: Arrows
 
 - **Monsters**:
 	- Move up to 2 times per turn, try to chase the player
@@ -50,7 +49,7 @@ You can enter up to 3 actions per turn (more if you chain monster kills with com
 
 - **Shooter Tiles**:
 	- Appear as `#`, act as walls
-	- Periodically fire arrows (`↑`, `↓`, `→`, `←`) in all 4 directions if the adjacent tile is floor
+	- Periodically fire arrows (`→`) in all 4 directions if the adjacent tile is floor
 	- Each shooter has its own timer (2-5 turns)
 
 - **Arrows**:
@@ -61,9 +60,9 @@ You can enter up to 3 actions per turn (more if you chain monster kills with com
 - **Health and Power-ups**:
 	- `+`: Grants +2 HP (and +2 ammo on Medium/Hard)
 	- `P`: Grants a random power-up:
-		- `time_stop`: Take 200 actions in one turn
-		- `invulnerable/5hp`: Become invulnerable for next damage or gain +5 HP if used
-		- `explosive`: Destroy a large area and kill monsters in a radius
+	- `time_stop`: Take 200 actions in one turn
+	- `invulnerable/5hp`: Become invulnerable for next damage or gain +5 HP if used
+	- `explosive`: Destroy a large area and kill monsters in a radius
 
 - **Ammo System**:
 	- Displayed next to HP
@@ -76,7 +75,7 @@ You can enter up to 3 actions per turn (more if you chain monster kills with com
 	- Each monster killed in a turn grants +2 extra actions immediately in that turn (chain combos for huge turns!)
 
 - **Cheat Codes**:
-	- Enter `56840` followed by a power-up name (e.g., `56840time_stop`) to instantly gain that power-up -- used mostly for debugging
+	- Enter `56840` followed by a power-up name (e.g., `56840time_stop`) or room number to instantly gain that power-up or go to that room -- used mostly for debugging
 
 ## Difficulty
 
@@ -90,3 +89,8 @@ You can enter up to 3 actions per turn (more if you chain monster kills with com
 - Use arrows and power-ups strategically to clear tough rooms
 - Watch out for shooters and spike traps!
 
+## Trap Rooms & Progressive Difficulty
+
+- Every 5th room is a trap room with no monsters, but many spikes and shooters.
+- Trap rooms start with high spike and shooter counts, scaling up as you progress (room number increases).
+- Trap room difficulty and spike/shooter counts are higher in harder difficulties.
