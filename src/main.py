@@ -531,6 +531,7 @@ def main() -> None:
                         pass
                     elif player.power_up == 'invulnerable/5hp':
                         player.power_up = None
+                        pass
                     else:
                         player.hp = 0
                 # Crossing path detection: if player moved to where arrow was, and arrow moves to where player was
@@ -539,6 +540,7 @@ def main() -> None:
                         pass
                     elif player.power_up == 'invulnerable/5hp':
                         player.power_up = None
+                        pass
                     else:
                         player.hp = 0
                 # Arrow moves to next tile
@@ -559,6 +561,7 @@ def main() -> None:
                 pass
             elif player.power_up == 'invulnerable/5hp':
                 player.power_up = None
+                pass
             else:
                 player.hp = 0
 
