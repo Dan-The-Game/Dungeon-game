@@ -1,3 +1,14 @@
+# Shooter with independent timer
+class Shooter:
+    def __init__(self, row, col):
+        self.row = row
+        self.col = col
+        self.period = random.randint(2, 5)
+        self.turn = 0
+    def ready(self):
+        return self.turn % self.period == 0
+    def advance(self):
+        self.turn += 1
 SHOOTER = "#"
 ARROW_UP = "↑"
 ARROW_DOWN = "↓"
@@ -91,6 +102,49 @@ def build_grid(
                 if 0 < r < height - 1 and 0 < c < width - 1:
                     grid[r][c] = FLOOR
 
+        while (row, col) != end:
+            if random.random() < 0.5:
+                row += 1 if row < end[0] else 0
+                row -= 1 if row > end[0] else 0
+            else:
+                col += 1 if col < end[1] else 0
+                col -= 1 if col > end[1] else 0
+            grid[row][col] = FLOOR
+
+        for r in range(1, height - 1):
+            for c in range(1, width - 1):
+                if grid[r][c] == WALL and random.random() < floor_chance:
+                    grid[r][c] = FLOOR
+        for _ in range(walkers):
+            row, col = random.randint(1, height - 2), random.randint(1, width - 2)
+            for _ in range(walk_steps):
+                grid[row][col] = FLOOR
+                dr, dc = random.choice(list(DIRECTIONS.values()))
+                row = max(1, min(height - 2, row + dr))
+                col = max(1, min(width - 2, col + dc))
+        grid[end[0]][end[1]] = EXIT
+
+        # Place SHOOTER tiles after map is generated, based on difficulty
+        shooter_count = 0
+        if hasattr(build_grid, 'difficulty'):
+            diff = build_grid.difficulty
+            if diff == 'e':
+                shooter_count = 1 if random.random() < 0.15 else 0
+            elif diff == 'm':
+                shooter_count = 1
+            elif diff == 'h':
+                shooter_count = random.choice([2, 3])
+        # Place shooters on random wall tiles (not on border)
+        wall_tiles = [(r, c) for r in range(2, height-2) for c in range(2, width-2) if grid[r][c] == WALL]
+        random.shuffle(wall_tiles)
+        shooters = []
+        for i in range(min(shooter_count, len(wall_tiles))):
+            r, c = wall_tiles[i]
+            grid[r][c] = SHOOTER
+            shooters.append(Shooter(r, c))
+
+        if is_reachable(grid, start, end):
+            return grid, shooters
         while (row, col) != end:
             if random.random() < 0.5:
                 row += 1 if row < end[0] else 0
@@ -290,7 +344,7 @@ def place_health_pickups(grid: list[list[str]], count: int, forbidden: set[tuple
 def generate_room(player: Actor, room: int, difficulty: str) -> tuple[list[list[str]], tuple[int, int], list[Actor]]:
     # Pass difficulty to build_grid for shooter placement
     build_grid.difficulty = difficulty
-    grid = build_grid(width=GRID_SIZE, height=GRID_SIZE, floor_chance=0.65, walkers=6, walk_steps=80)
+    grid, shooters = build_grid(width=GRID_SIZE, height=GRID_SIZE, floor_chance=0.65, walkers=6, walk_steps=80)
     exit_pos = find_char(grid, EXIT)[0]
     player.row, player.col = 1, 1
     if difficulty == "e":
@@ -338,7 +392,7 @@ def generate_room(player: Actor, room: int, difficulty: str) -> tuple[list[list[
                     grid[r][c] = 'P'
                     forbidden.add((r, c))
                     break
-    return grid, exit_pos, monsters, spikes
+    return grid, exit_pos, monsters, spikes, shooters
 
 
 def main() -> None:
@@ -368,30 +422,77 @@ def main() -> None:
     player = Actor(row=1, col=1, hp=start_hp)
     room = 1
     score = 0
-    grid, exit_pos, monsters, spikes = generate_room(player, room, diff)
+    grid, exit_pos, monsters, spikes, shooters = generate_room(player, room, diff)
 
     while True:
-        # Move arrows before rendering
+        # Advance shooters and spawn arrows if ready
         arrow_dirs = {
             ARROW_UP: (-1, 0),
             ARROW_DOWN: (1, 0),
             ARROW_LEFT: (0, -1),
             ARROW_RIGHT: (0, 1),
         }
+        shooter_to_arrow = [
+            (ARROW_UP, -1, 0),
+            (ARROW_DOWN, 1, 0),
+            (ARROW_LEFT, 0, -1),
+            (ARROW_RIGHT, 0, 1),
+        ]
+
+        # Track arrows spawned this turn so they don't move immediately
+        just_spawned_arrows = set()
+        for shooter in shooters:
+            if shooter.ready():
+                for arrow, dr, dc in shooter_to_arrow:
+                    nr, nc = shooter.row + dr, shooter.col + dc
+                    if 0 <= nr < len(grid) and 0 <= nc < len(grid[0]) and grid[nr][nc] == FLOOR:
+                        grid[nr][nc] = arrow
+                        just_spawned_arrows.add((nr, nc))
+            shooter.advance()
+
+        # Move arrows before rendering, skipping those just spawned
+
         arrows_to_move = []
         for r in range(len(grid)):
             for c in range(len(grid[0])):
-                if grid[r][c] in arrow_dirs:
+                if grid[r][c] in arrow_dirs and (r, c) not in just_spawned_arrows:
                     arrows_to_move.append((r, c, grid[r][c]))
+
+        # Track player previous position for crossing detection
+        player_prev = (player.row, player.col)
+        arrow_prev_positions = {}
+        for r, c, arrow in arrows_to_move:
+            arrow_prev_positions[(r, c)] = arrow
+
         for r, c, arrow in arrows_to_move:
             dr, dc = arrow_dirs[arrow]
             nr, nc = r + dr, c + dc
-            # Only move if in bounds and next tile is FLOOR
-            if 0 <= nr < len(grid) and 0 <= nc < len(grid[0]) and grid[nr][nc] == FLOOR:
-                grid[nr][nc] = arrow
-                grid[r][c] = FLOOR
+            # Only move if in bounds and next tile is FLOOR or contains player/monster
+            if 0 <= nr < len(grid) and 0 <= nc < len(grid[0]):
+                # Insta-kill monster if present
+                for m in monsters:
+                    if m.row == nr and m.col == nc and m.hp > 0:
+                        m.hp = 0
+                # Insta-kill player if present
+                if player.row == nr and player.col == nc:
+                    player.hp = 0
+                # Crossing path detection: if player moved to where arrow was, and arrow moves to where player was
+                if (nr, nc) == player_prev and (player.row, player.col) == (r, c):
+                    player.hp = 0
+                if grid[nr][nc] == FLOOR:
+                    grid[nr][nc] = arrow
+                    grid[r][c] = FLOOR
+                else:
+                    grid[r][c] = FLOOR
             else:
                 grid[r][c] = FLOOR
+
+        # Insta-kill if player or monster is standing on an arrow after all arrows move
+        for m in monsters:
+            if m.hp > 0 and grid[m.row][m.col] in arrow_dirs:
+                m.hp = 0
+        if grid[player.row][player.col] in arrow_dirs:
+            player.hp = 0
 
         clear_screen()
         print(render(grid, player, monsters, spikes))
