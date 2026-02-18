@@ -71,6 +71,7 @@ class Actor:
     row: int
     col: int
     hp: int
+    ammo: int = 5
     power_up: str = None  # Holds current power-up
 
 
@@ -412,14 +413,17 @@ def main() -> None:
         print("Invalid input. Please enter 'e', 'm', or 'h'.")
     if diff == "e":
         start_hp = 5
+        start_ammo = -1
     elif diff == "m":
         start_hp = 3
+        start_ammo = 10
     else:
         start_hp = 1
+        start_ammo = 5
 
     allowed_moves = 3
 
-    player = Actor(row=1, col=1, hp=start_hp)
+    player = Actor(row=1, col=1, hp=start_hp, ammo=start_ammo)
     room = 1
     score = 0
     grid, exit_pos, monsters, spikes, shooters = generate_room(player, room, diff)
@@ -499,8 +503,9 @@ def main() -> None:
         print()
         def show_status():
             powerup_display = player.power_up if player.power_up else "None"
+            ammo_display = "infinite" if player.ammo < 0 else str(player.ammo)
             print(
-                f"Room: {room}  HP: {player.hp}  Power-up: {powerup_display}  Score: {score}  Monsters: {len(monsters)}  Exit: {exit_pos}"
+                f"Room: {room}  HP: {player.hp}  Ammo: {ammo_display}  Power-up: {powerup_display}  Score: {score}  Monsters: {len(monsters)}  Exit: {exit_pos}"
             )
         show_status()
 
@@ -515,7 +520,7 @@ def main() -> None:
 
         if (player.row, player.col) == exit_pos:
             room += 1
-            grid, exit_pos, monsters, spikes = generate_room(player, room, diff)
+            grid, exit_pos, monsters, spikes, shooters = generate_room(player, room, diff)
             continue
 
         if player.hp <= 0:
@@ -549,11 +554,26 @@ def main() -> None:
         move_limit = allowed_moves
         i = 0
         powerup_used_this_turn = False
+        move_limit = allowed_moves  # Start with base allowed moves
         while i < len(move_seq) and i < move_limit:
             move = move_seq[i]
-            # Health pickup
+            # Shoot arrow: 'e' followed by direction (w/a/s/d)
+            if move == 'e' and i + 1 < len(move_seq):
+                dir_key = move_seq[i + 1]
+                dir_map = {'w': (ARROW_UP, -1, 0), 'a': (ARROW_LEFT, 0, -1), 's': (ARROW_DOWN, 1, 0), 'd': (ARROW_RIGHT, 0, 1)}
+                if dir_key in dir_map and player.ammo != 0:
+                    arrow, dr, dc = dir_map[dir_key]
+                    nr, nc = player.row + dr, player.col + dc
+                    if 0 <= nr < len(grid) and 0 <= nc < len(grid[0]) and grid[nr][nc] == FLOOR:
+                        grid[nr][nc] = arrow
+                        player.ammo -= 1
+                i += 2
+                continue
+            # Health/ammo pickup
             if grid[player.row][player.col] == HEALTH:
                 player.hp += 2
+                if diff != "e":
+                    player.ammo += 2
                 grid[player.row][player.col] = FLOOR
             # Spike logic: skip check on first move (i == 0)
             if i > 0:
@@ -596,7 +616,7 @@ def main() -> None:
             show_status()
             if (player.row, player.col) == exit_pos:
                 room += 1
-                grid, exit_pos, monsters = generate_room(player, room, diff)
+                grid, exit_pos, monsters, spikes, shooters = generate_room(player, room, diff)
                 break
             if player.hp <= 0:
                 print("You were defeated.")
@@ -623,6 +643,7 @@ def main() -> None:
                                 m.hp = 0
                                 killed += 1
                         score += killed
+                        move_limit += 2 * killed  # Grant two extra actions per kill immediately
                     player.power_up = None
                     powerup_used_this_turn = True
                     show_status()
@@ -635,6 +656,7 @@ def main() -> None:
                         target.hp -= 1
                         if target.hp == 0:
                             score += 1
+                            move_limit += 2  # Grant two extra actions per kill immediately
                     player.predicted_attack = False
                 else:
                     # Set prediction flag if no monster is adjacent
@@ -642,6 +664,8 @@ def main() -> None:
                 monsters = remove_dead(monsters)
                 i += 1
                 continue
+                # Combo: for each monster killed this turn, allow one extra input next turn
+                combo_bonus = combo_kills
             if move in DIRECTIONS:
                 dr, dc = DIRECTIONS[move]
                 try_move(player, dr, dc, grid)
