@@ -89,6 +89,7 @@ def build_grid(
     floor_chance: float,
     walkers: int,
     walk_steps: int,
+    shooter_multiplier: int = 1,
 ) -> list[list[str]]:
     start = (1, 1)
     end = (height - 2, width - 2)
@@ -126,15 +127,23 @@ def build_grid(
         grid[end[0]][end[1]] = EXIT
 
         # Place SHOOTER tiles after map is generated, based on difficulty
-        shooter_count = 0
-        if hasattr(build_grid, 'difficulty'):
-            diff = build_grid.difficulty
-            if diff == 'e':
-                shooter_count = 1 if random.random() < 0.15 else 0
-            elif diff == 'm':
-                shooter_count = 1
-            elif diff == 'h':
-                shooter_count = random.choice([2, 3])
+        def get_shooter_count():
+            if hasattr(build_grid, 'difficulty'):
+                diff = build_grid.difficulty
+                # Always at least 1 shooter in easy trap rooms
+                if diff == 'e' and shooter_multiplier > 1:
+                    base = 1
+                elif diff == 'e':
+                    base = 1 if random.random() < 0.15 else 0
+                elif diff == 'm':
+                    base = 1
+                elif diff == 'h':
+                    base = random.choice([2, 3])
+                else:
+                    base = 0
+                return base * shooter_multiplier
+            return 0
+        shooter_count = get_shooter_count()
         # Place shooters on random wall tiles (not on border)
         wall_tiles = [(r, c) for r in range(2, height-2) for c in range(2, width-2) if grid[r][c] == WALL]
         random.shuffle(wall_tiles)
@@ -146,47 +155,6 @@ def build_grid(
 
         if is_reachable(grid, start, end):
             return grid, shooters
-        while (row, col) != end:
-            if random.random() < 0.5:
-                row += 1 if row < end[0] else 0
-                row -= 1 if row > end[0] else 0
-            else:
-                col += 1 if col < end[1] else 0
-                col -= 1 if col > end[1] else 0
-            grid[row][col] = FLOOR
-
-        for r in range(1, height - 1):
-            for c in range(1, width - 1):
-                if grid[r][c] == WALL and random.random() < floor_chance:
-                    grid[r][c] = FLOOR
-        for _ in range(walkers):
-            row, col = random.randint(1, height - 2), random.randint(1, width - 2)
-            for _ in range(walk_steps):
-                grid[row][col] = FLOOR
-                dr, dc = random.choice(list(DIRECTIONS.values()))
-                row = max(1, min(height - 2, row + dr))
-                col = max(1, min(width - 2, col + dc))
-        grid[end[0]][end[1]] = EXIT
-
-        # Place SHOOTER tiles after map is generated, based on difficulty
-        shooter_count = 0
-        if hasattr(build_grid, 'difficulty'):
-            diff = build_grid.difficulty
-            if diff == 'e':
-                shooter_count = 1 if random.random() < 0.15 else 0
-            elif diff == 'm':
-                shooter_count = 1
-            elif diff == 'h':
-                shooter_count = random.choice([2, 3])
-        # Place shooters on random wall tiles (not on border)
-        wall_tiles = [(r, c) for r in range(2, height-2) for c in range(2, width-2) if grid[r][c] == WALL]
-        random.shuffle(wall_tiles)
-        for i in range(min(shooter_count, len(wall_tiles))):
-            r, c = wall_tiles[i]
-            grid[r][c] = SHOOTER
-
-        if is_reachable(grid, start, end):
-            return grid
 
 
 def is_reachable(
@@ -239,14 +207,20 @@ def spawn_monsters(
     monsters: list[Actor] = []
     # Spawn invulnerable monsters first (hp = -1)
     for _ in range(invuln_count):
-        row, col = random_floor_tile(grid, forbidden)
-        forbidden.add((row, col))
-        monsters.append(Actor(row=row, col=col, hp=-1))
+        try:
+            row, col = random_floor_tile(grid, forbidden)
+            forbidden.add((row, col))
+            monsters.append(Actor(row=row, col=col, hp=-1))
+        except IndexError:
+            break
     # Spawn regular monsters
     for _ in range(count):
-        row, col = random_floor_tile(grid, forbidden)
-        forbidden.add((row, col))
-        monsters.append(Actor(row=row, col=col, hp=1))
+        try:
+            row, col = random_floor_tile(grid, forbidden)
+            forbidden.add((row, col))
+            monsters.append(Actor(row=row, col=col, hp=1))
+        except IndexError:
+            break
     return monsters
 
 
@@ -345,55 +319,122 @@ def place_health_pickups(grid: list[list[str]], count: int, forbidden: set[tuple
 def generate_room(player: Actor, room: int, difficulty: str) -> tuple[list[list[str]], tuple[int, int], list[Actor]]:
     # Pass difficulty to build_grid for shooter placement
     build_grid.difficulty = difficulty
-    grid, shooters = build_grid(width=GRID_SIZE, height=GRID_SIZE, floor_chance=0.65, walkers=6, walk_steps=80)
-    exit_pos = find_char(grid, EXIT)[0]
-    player.row, player.col = 1, 1
-    if difficulty == "e":
-        monster_count = 3 + room
-        health_count = 1 + (room // 2)
-        invuln_count = 0
-    elif difficulty == "m":
-        monster_count = 5 + 2 * room
-        health_count = 1
-        invuln_count = 1 if random.random() < 0.10 else 0
+    # Trap rooms get harder as room increases
+    if room % 5 == 0:
+        # Trap room starting difficulty based on overall difficulty
+        trap_scale = max(1, room // 5)
+        if difficulty == 'e':
+            base_shooters = 8
+            base_spikes = int(GRID_SIZE * 1.2)
+        elif difficulty == 'm':
+            base_shooters = 16
+            base_spikes = int(GRID_SIZE * 2.0)
+        else:  # 'h'
+            base_shooters = 32
+            base_spikes = int(GRID_SIZE * 4.0)
+        shooter_multiplier = min(base_shooters + trap_scale, 15 * trap_scale)
+        # Calculate available floor tiles for capping
+        grid_tmp, _ = build_grid(width=GRID_SIZE, height=GRID_SIZE, floor_chance=0.65, walkers=6, walk_steps=80, shooter_multiplier=1)
+        available_floors = [
+            (r, c)
+            for r in range(1, len(grid_tmp) - 1)
+            for c in range(1, len(grid_tmp[0]) - 1)
+            if grid_tmp[r][c] == FLOOR and (r, c) not in {(1, 1)}
+        ]
+        max_trap_features = max(1, len(available_floors) - 2)  # leave space for player and powerup
+        shooter_multiplier = min(shooter_multiplier, max_trap_features // 2)
+        max_spikes = max_trap_features - shooter_multiplier
+        trap_spike_scale = min(trap_scale, 5)
+        spike_count = min(base_spikes + int(GRID_SIZE * 0.5 * (trap_spike_scale - 1)), max_spikes)
     else:
-        monster_count = 10 + 4 * room
-        health_count = 1 if room == 1 else 0
-        roll = random.random()
-        if roll < 0.80:
-            invuln_count = 1
-        elif roll < 0.90:
-            invuln_count = 2
+        shooter_multiplier = 1
+        max_spikes = None
+    grid, shooters = build_grid(width=GRID_SIZE, height=GRID_SIZE, floor_chance=0.65, walkers=6, walk_steps=80, shooter_multiplier=shooter_multiplier)
+    exit_pos = find_char(grid, EXIT)[0]
+    # Ensure player spawn tile is always safe
+    grid[1][1] = FLOOR
+    player.row, player.col = 1, 1
+    if room % 5 == 0:
+        # Trap room: no monsters, just spikes and shooters
+        monsters = []
+        forbidden = {(1, 1), exit_pos}
+        health_count = 0
+        # More spikes for trap rooms, scaling with room number
+        spikes = place_spikes(grid, spike_count, forbidden)
+        powerup_count = 1
+        if powerup_count > 0:
+            for _ in range(powerup_count):
+                while True:
+                    r = random.randint(1, len(grid) - 2)
+                    c = random.randint(1, len(grid[0]) - 2)
+                    if (r, c) not in forbidden and grid[r][c] == FLOOR:
+                        grid[r][c] = 'P'
+                        forbidden.add((r, c))
+                        break
+        return grid, exit_pos, monsters, spikes, shooters
+    else:
+        if difficulty == "e":
+            monster_count = 3 + room
+            health_count = 1 + (room // 2)
+            invuln_count = 0
+        elif difficulty == "m":
+            monster_count = 5 + 2 * room
+            health_count = 1
+            invuln_count = 1 if random.random() < 0.10 else 0
+        else:
+            monster_count = 10 + 4 * room
+            health_count = 1 if room == 1 else 0
+            roll = random.random()
+            if roll < 0.80:
+                invuln_count = 1
+            elif roll < 0.90:
+                invuln_count = 2
+            else:
+                invuln_count = 0
+        # Cap monsters to available floor tiles
+        available_floors = [
+            (r, c)
+            for r in range(1, len(grid) - 1)
+            for c in range(1, len(grid[0]) - 1)
+            if grid[r][c] == FLOOR and (r, c) not in {(1, 1), exit_pos}
+        ]
+        max_monsters = max(0, len(available_floors))
+        total_monsters = min(monster_count + invuln_count, max_monsters)
+        # Try to keep the same ratio of invuln/regular
+        if monster_count + invuln_count > 0:
+            invuln_count = int(invuln_count * total_monsters / (monster_count + invuln_count))
+            monster_count = total_monsters - invuln_count
         else:
             invuln_count = 0
-    monsters = spawn_monsters(grid, count=monster_count, forbidden={(1, 1), exit_pos}, invuln_count=invuln_count)
-    forbidden = {(1, 1), exit_pos}
-    forbidden.update((m.row, m.col) for m in monsters)
-    if health_count > 0:
-        place_health_pickups(grid, health_count, forbidden)
-    if difficulty == "m":
-        spike_count = monster_count
-    elif difficulty == "h":
-        spike_count = int(monster_count * 1.5)
-    else:
-        spike_count = max(2, monster_count // 2)
-    spikes = place_spikes(grid, spike_count, forbidden)
-    powerup_count = 0
-    if difficulty in ("e", "m"):
-        powerup_count = 1
-    elif difficulty == "h" and room < 10:
-        if random.random() < 0.10:
+            monster_count = 0
+        monsters = spawn_monsters(grid, count=monster_count, forbidden={(1, 1), exit_pos}, invuln_count=invuln_count)
+        forbidden = {(1, 1), exit_pos}
+        forbidden.update((m.row, m.col) for m in monsters)
+        if health_count > 0:
+            place_health_pickups(grid, health_count, forbidden)
+        if difficulty == "m":
+            spike_count = monster_count
+        elif difficulty == "h":
+            spike_count = int(monster_count * 1.5)
+        else:
+            spike_count = max(2, monster_count // 2)
+        spikes = place_spikes(grid, spike_count, forbidden)
+        powerup_count = 0
+        if difficulty in ("e", "m"):
             powerup_count = 1
-    if powerup_count > 0:
-        for _ in range(powerup_count):
-            while True:
-                r = random.randint(1, len(grid) - 2)
-                c = random.randint(1, len(grid[0]) - 2)
-                if (r, c) not in forbidden and grid[r][c] == FLOOR:
-                    grid[r][c] = 'P'
-                    forbidden.add((r, c))
-                    break
-    return grid, exit_pos, monsters, spikes, shooters
+        elif difficulty == "h" and room < 10:
+            if random.random() < 0.10:
+                powerup_count = 1
+        if powerup_count > 0:
+            for _ in range(powerup_count):
+                while True:
+                    r = random.randint(1, len(grid) - 2)
+                    c = random.randint(1, len(grid[0]) - 2)
+                    if (r, c) not in forbidden and grid[r][c] == FLOOR:
+                        grid[r][c] = 'P'
+                        forbidden.add((r, c))
+                        break
+        return grid, exit_pos, monsters, spikes, shooters
 
 
 def main() -> None:
@@ -426,7 +467,8 @@ def main() -> None:
     player = Actor(row=1, col=1, hp=start_hp, ammo=start_ammo)
     room = 1
     score = 0
-    grid, exit_pos, monsters, spikes, shooters = generate_room(player, room, diff)
+    max_room = 1000
+    grid, exit_pos, monsters, spikes, shooters = generate_room(player, min(room, max_room), diff)
 
     while True:
         # Advance shooters and spawn arrows if ready
@@ -549,13 +591,22 @@ def main() -> None:
 
 
         move_seq = input(f"Enter up to {allowed_moves} actions (WASD to move, F to attack, U to use power-up, Q to quit, R to restart): ").strip().lower()
-        # Cheat code: 56840(powerupname)
+        # Cheat code: 56840<number> to set next room, or 56840(powerupname) for power-up
         if move_seq.startswith("56840"):
-            cheat_power = move_seq[5:]
+            cheat_val = move_seq[5:]
             valid_powers = {"time_stop", "invulnerable/5hp", "explosive"}
-            if cheat_power in valid_powers:
-                player.power_up = cheat_power
-                print(f"Cheat activated: {cheat_power} power-up granted!")
+            if cheat_val.isdigit():
+                max_room = 1000
+                room = int(cheat_val)
+                if room > max_room:
+                    print(f"Room number too high, capping to {max_room}.")
+                    room = max_room
+                grid, exit_pos, monsters, spikes, shooters = generate_room(player, room, diff)
+                print(f"Cheat activated: Next room set to {room}!")
+                continue
+            elif cheat_val in valid_powers:
+                player.power_up = cheat_val
+                print(f"Cheat activated: {cheat_val} power-up granted!")
                 continue
         if "q" in move_seq:
             print("Goodbye.")
