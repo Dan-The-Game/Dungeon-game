@@ -1,3 +1,4 @@
+SHOOTER = "#"
 TILE_SIZE = 2  # Each tile is TILE_SIZE x TILE_SIZE block
 import os
 import random
@@ -6,7 +7,7 @@ from dataclasses import dataclass
 
 
 GRID_SIZE = 24  # Change this to set map size (nxn)
-WALL = "#"
+WALL = "■"
 FLOOR = "."
 EXIT = "E"
 PLAYER = "@"
@@ -107,6 +108,24 @@ def build_grid(
                 row = max(1, min(height - 2, row + dr))
                 col = max(1, min(width - 2, col + dc))
         grid[end[0]][end[1]] = EXIT
+
+        # Place SHOOTER tiles after map is generated, based on difficulty
+        shooter_count = 0
+        if hasattr(build_grid, 'difficulty'):
+            diff = build_grid.difficulty
+            if diff == 'e':
+                shooter_count = 1 if random.random() < 0.15 else 0
+            elif diff == 'm':
+                shooter_count = 1
+            elif diff == 'h':
+                shooter_count = random.choice([2, 3])
+        # Place shooters on random wall tiles (not on border)
+        wall_tiles = [(r, c) for r in range(2, height-2) for c in range(2, width-2) if grid[r][c] == WALL]
+        random.shuffle(wall_tiles)
+        for i in range(min(shooter_count, len(wall_tiles))):
+            r, c = wall_tiles[i]
+            grid[r][c] = SHOOTER
+
         if is_reachable(grid, start, end):
             return grid
 
@@ -126,7 +145,7 @@ def is_reachable(
             nr, nc = row + dr, col + dc
             if (nr, nc) in seen:
                 continue
-            if grid[nr][nc] in (WALL,):
+            if grid[nr][nc] in (WALL, SHOOTER):
                 continue
             seen.add((nr, nc))
             queue.append((nr, nc))
@@ -199,6 +218,8 @@ def render(grid: list[list[str]], player: Actor, monsters: list[Actor], spikes: 
             return "\033[90m▲\033[0m"  # Gray
         if char == SPIKE_SAFE:
             return "\033[37m_\033[0m"  # White underscore
+        if char == SHOOTER:
+            return "\033[37m#\033[0m"  # White shooter
         if char == EXIT:
             return "\033[34mE\033[0m"
         if char == 'P':
@@ -217,18 +238,18 @@ def render(grid: list[list[str]], player: Actor, monsters: list[Actor], spikes: 
                 block_rows[i].append(cell_block)
         for block_row in block_rows:
             expanded_rows.append(block_row)
+
     return "\n".join("".join(cell for cell in tile_row) for tile_row in expanded_rows)
 
-
+# Move try_move above main
 def try_move(actor: Actor, dr: int, dc: int, grid: list[list[str]]) -> None:
     new_row, new_col = clamp_move(actor.row + dr, actor.col + dc, grid)
-    if grid[new_row][new_col] == WALL:
+    if grid[new_row][new_col] == WALL or grid[new_row][new_col] == SHOOTER:
         return
     # Prevent monsters from moving onto each other
-    if hasattr(actor, 'is_monster') and actor.is_monster:
-        for other in actor.monster_list:
-            if other is not actor and (other.row, other.col) == (new_row, new_col):
-                return
+    for other in getattr(actor, 'monster_list', []):
+        if other is not actor and (other.row, other.col) == (new_row, new_col):
+            return
     actor.row, actor.col = new_row, new_col
 
 
@@ -255,6 +276,8 @@ def place_health_pickups(grid: list[list[str]], count: int, forbidden: set[tuple
         forbidden.add((r, c))
 
 def generate_room(player: Actor, room: int, difficulty: str) -> tuple[list[list[str]], tuple[int, int], list[Actor]]:
+    # Pass difficulty to build_grid for shooter placement
+    build_grid.difficulty = difficulty
     grid = build_grid(width=GRID_SIZE, height=GRID_SIZE, floor_chance=0.65, walkers=6, walk_steps=80)
     exit_pos = find_char(grid, EXIT)[0]
     player.row, player.col = 1, 1
@@ -407,12 +430,10 @@ def main() -> None:
                             spikes.remove(spike_here)
                             if getattr(player, 'invulnerable', False):
                                 player.invulnerable = False
-                            if player.power_up == 'invulnerable' or player.power_up == 'invulnerable/5hp':
+                            if player.power_up == 'invulnerable/5hp':
                                 player.power_up = None
-                            print("You stepped on a spike, but your invulnerability saved you! The spike is destroyed.")
                         else:
                             show_status()
-                            print("You stepped on a spike trap! Game over.")
                             print(f"Final Score: {score}")
                             print("=================")
                             while True:
