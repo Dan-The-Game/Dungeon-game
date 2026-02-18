@@ -471,7 +471,7 @@ def main() -> None:
         for r, c, arrow in arrows_to_move:
             dr, dc = arrow_dirs[arrow]
             nr, nc = r + dr, c + dc
-            # Only move if in bounds and next tile is FLOOR or contains player/monster
+            # Only move if in bounds
             if 0 <= nr < len(grid) and 0 <= nc < len(grid[0]):
                 # Insta-kill monster if present
                 for m in monsters:
@@ -485,13 +485,22 @@ def main() -> None:
                 if (nr, nc) == player_prev and (player.row, player.col) == (r, c):
                     if not (getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable/5hp'):
                         player.hp = 0
-                if grid[nr][nc] == FLOOR:
+                # Arrow moves to next tile
+                if grid[nr][nc] == FLOOR or grid[nr][nc] in arrow_dirs:
                     grid[nr][nc] = arrow
                     grid[r][c] = FLOOR
                 else:
                     grid[r][c] = FLOOR
             else:
                 grid[r][c] = FLOOR
+
+        # Insta-kill if player or monster is standing on an arrow after all arrows move
+        for m in monsters:
+            if m.hp > 0 and grid[m.row][m.col] in arrow_dirs:
+                m.hp = 0
+        if grid[player.row][player.col] in arrow_dirs:
+            if not (getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable/5hp'):
+                player.hp = 0
 
         # Insta-kill if player or monster is standing on an arrow after all arrows move
         for m in monsters:
@@ -578,8 +587,21 @@ def main() -> None:
                 if diff != "e":
                     player.ammo += 2
                 grid[player.row][player.col] = FLOOR
-            # Spike logic: skip check on first move (i == 0)
+            # Spike logic: skip check on first move (i > 0):
             if i > 0:
+                # Arrow logic: player dies if moves onto arrow (unless invulnerable)
+                if grid[player.row][player.col] in arrow_dirs:
+                    if not (getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable' or player.power_up == 'invulnerable/5hp'):
+                        show_status()
+                        print(f"Final Score: {score}")
+                        print("=================")
+                        while True:
+                            choice = input("Press R to restart or Q to quit: ").strip().lower()
+                            if choice == "q":
+                                return
+                            if choice == "r":
+                                main()
+                                return
                 spike_here = next((s for s in spikes if s.row == player.row and s.col == player.col), None)
                 if spike_here:
                     if spike_here.is_dangerous():
@@ -707,6 +729,10 @@ def main() -> None:
                 new_row, new_col = clamp_move(monster.row + dr, monster.col + dc, grid)
                 spike_there = next((s for s in spikes if s.row == new_row and s.col == new_col), None)
                 if spike_there and spike_there.is_dangerous():
+                    monster.hp = 0
+                    break
+                # Arrow logic: monster dies if moves onto arrow
+                if grid[new_row][new_col] in arrow_dirs:
                     monster.hp = 0
                     break
                 try_move(monster, dr, dc, grid)
