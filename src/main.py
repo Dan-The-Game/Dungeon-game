@@ -13,13 +13,30 @@ PLAYER = "@"
 MONSTER = "M"
 INVULN_MONSTER = "X"
 HEALTH = "+"
-SPIKE = "▲"
+SPIKE_DANGEROUS = "▲"
+SPIKE_SAFE = "_"
+
+class Spike:
+    def __init__(self, row, col):
+        self.row = row
+        self.col = col
+        self.period = random.choice([2, 3, 4])  # How many turns per cycle
+        self.offset = random.randint(0, self.period-1)  # Phase offset
+        self.turn = 0
+    def is_dangerous(self):
+        # Dangerous for half the period, safe for the other half
+        phase = (self.turn + self.offset) % self.period
+        return phase < self.period // 2
+    def advance(self):
+        self.turn += 1
 
 def place_spikes(grid: list[list[str]], count: int, forbidden: set[tuple[int, int]]):
+    spikes = []
     for _ in range(count):
         r, c = random_floor_tile(grid, forbidden)
-        grid[r][c] = SPIKE
+        spikes.append(Spike(r, c))
         forbidden.add((r, c))
+    return spikes
 
 DIRECTIONS = {
     "w": (-1, 0),
@@ -155,7 +172,7 @@ def spawn_monsters(
     return monsters
 
 
-def render(grid: list[list[str]], player: Actor, monsters: list[Actor]) -> str:
+def render(grid: list[list[str]], player: Actor, monsters: list[Actor], spikes: list) -> str:
     temp = [row[:] for row in grid]
     for monster in monsters:
         if monster.hp > 0 or monster.hp == -1:
@@ -163,6 +180,9 @@ def render(grid: list[list[str]], player: Actor, monsters: list[Actor]) -> str:
                 temp[monster.row][monster.col] = INVULN_MONSTER
             else:
                 temp[monster.row][monster.col] = MONSTER
+    # Place spikes (dangerous or safe)
+    for s in spikes:
+        temp[s.row][s.col] = SPIKE_DANGEROUS if s.is_dangerous() else SPIKE_SAFE
     temp[player.row][player.col] = PLAYER
 
     # Color mapping
@@ -175,8 +195,10 @@ def render(grid: list[list[str]], player: Actor, monsters: list[Actor]) -> str:
             return "\033[31;1mX\033[0m"
         if char == HEALTH:
             return "\033[32m+\033[0m"
-        if char == SPIKE:
+        if char == SPIKE_DANGEROUS:
             return "\033[90m▲\033[0m"  # Gray
+        if char == SPIKE_SAFE:
+            return "\033[37m_\033[0m"  # White underscore
         if char == EXIT:
             return "\033[34mE\033[0m"
         if char == 'P':
@@ -259,8 +281,13 @@ def generate_room(player: Actor, room: int, difficulty: str) -> tuple[list[list[
     forbidden.update((m.row, m.col) for m in monsters)
     if health_count > 0:
         place_health_pickups(grid, health_count, forbidden)
-    spike_count = max(2, monster_count // 2)
-    place_spikes(grid, spike_count, forbidden)
+    if difficulty == "m":
+        spike_count = monster_count
+    elif difficulty == "h":
+        spike_count = int(monster_count * 1.5)
+    else:
+        spike_count = max(2, monster_count // 2)
+    spikes = place_spikes(grid, spike_count, forbidden)
     powerup_count = 0
     if difficulty in ("e", "m"):
         powerup_count = 1
@@ -276,7 +303,7 @@ def generate_room(player: Actor, room: int, difficulty: str) -> tuple[list[list[
                     grid[r][c] = 'P'
                     forbidden.add((r, c))
                     break
-    return grid, exit_pos, monsters
+    return grid, exit_pos, monsters, spikes
 
 
 def main() -> None:
@@ -306,11 +333,11 @@ def main() -> None:
     player = Actor(row=1, col=1, hp=start_hp)
     room = 1
     score = 0
-    grid, exit_pos, monsters = generate_room(player, room, diff)
+    grid, exit_pos, monsters, spikes = generate_room(player, room, diff)
 
     while True:
         clear_screen()
-        print(render(grid, player, monsters))
+        print(render(grid, player, monsters, spikes))
         print()
         def show_status():
             powerup_display = player.power_up if player.power_up else "None"
@@ -326,23 +353,11 @@ def main() -> None:
             player.hp += 2
             grid[player.row][player.col] = FLOOR
 
-        # Spike trap: instant death
-        if grid[player.row][player.col] == SPIKE:
-            show_status()
-            print("You stepped on a spike trap! Game over.")
-            print(f"Final Score: {score}")
-            print("=================")
-            while True:
-                choice = input("Press R to restart or Q to quit: ").strip().lower()
-                if choice == "q":
-                    return
-                if choice == "r":
-                    main()
-                    return
+            # (Old spike check removed; now handled in move loop with spike objects)
 
         if (player.row, player.col) == exit_pos:
             room += 1
-            grid, exit_pos, monsters = generate_room(player, room, diff)
+            grid, exit_pos, monsters, spikes = generate_room(player, room, diff)
             continue
 
         if player.hp <= 0:
@@ -382,28 +397,34 @@ def main() -> None:
             if grid[player.row][player.col] == HEALTH:
                 player.hp += 2
                 grid[player.row][player.col] = FLOOR
-            # Spike trap: instant death unless invulnerable (slot or active)
-            if grid[player.row][player.col] == SPIKE:
-                if getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable' or player.power_up == 'invulnerable/5hp':
-                    grid[player.row][player.col] = FLOOR
-                    # Remove invulnerability from slot or active
-                    if getattr(player, 'invulnerable', False):
-                        player.invulnerable = False
-                    if player.power_up == 'invulnerable' or player.power_up == 'invulnerable/5hp':
-                        player.power_up = None
-                    print("You stepped on a spike, but your invulnerability saved you! The spike is destroyed.")
-                else:
-                    show_status()
-                    print("You stepped on a spike trap! Game over.")
-                    print(f"Final Score: {score}")
-                    print("=================")
-                    while True:
-                        choice = input("Press R to restart or Q to quit: ").strip().lower()
-                        if choice == "q":
-                            return
-                        if choice == "r":
-                            main()
-                            return
+            # Spike logic: skip check on first move (i == 0)
+            if i > 0:
+                spike_here = next((s for s in spikes if s.row == player.row and s.col == player.col), None)
+                if spike_here:
+                    if spike_here.is_dangerous():
+                        if getattr(player, 'invulnerable', False) or player.power_up == 'invulnerable' or player.power_up == 'invulnerable/5hp':
+                            # Remove spike and invulnerability
+                            spikes.remove(spike_here)
+                            if getattr(player, 'invulnerable', False):
+                                player.invulnerable = False
+                            if player.power_up == 'invulnerable' or player.power_up == 'invulnerable/5hp':
+                                player.power_up = None
+                            print("You stepped on a spike, but your invulnerability saved you! The spike is destroyed.")
+                        else:
+                            show_status()
+                            print("You stepped on a spike trap! Game over.")
+                            print(f"Final Score: {score}")
+                            print("=================")
+                            while True:
+                                choice = input("Press R to restart or Q to quit: ").strip().lower()
+                                if choice == "q":
+                                    return
+                                if choice == "r":
+                                    main()
+                                    return
+                    else:
+                        # Safe spike, nothing happens
+                        pass
             # Power-up pickup (placeholder: 'P' tile)
             if grid[player.row][player.col] == 'P':
                 if player.power_up is None:
@@ -499,9 +520,18 @@ def main() -> None:
                             dr = 0
                 else:
                     dr, dc = random.choice(list(DIRECTIONS.values()))
+                # Predict new position
+                new_row, new_col = clamp_move(monster.row + dr, monster.col + dc, grid)
+                spike_there = next((s for s in spikes if s.row == new_row and s.col == new_col), None)
+                if spike_there and spike_there.is_dangerous():
+                    monster.hp = 0
+                    break
                 try_move(monster, dr, dc, grid)
             del monster.is_monster
             del monster.monster_list
+        # Advance all spike timers
+        for s in spikes:
+            s.advance()
 
 
 
