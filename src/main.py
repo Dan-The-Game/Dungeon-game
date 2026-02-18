@@ -356,13 +356,11 @@ def main() -> None:
                 # Power-up pickup (placeholder: 'P' tile)
                 if grid[player.row][player.col] == 'P':
                     if player.power_up is None:
-                        # Randomly choose between extra_move and invulnerable
+                        # Randomly choose between time stop and invulnerable
                         if random.random() < 0.5:
-                            player.power_up = 'extra_move'
-                            print("You picked up a power-up! (extra move)")
+                            player.power_up = 'time_stop'
                         else:
-                            player.power_up = 'invulnerable'
-                            print("You picked up a power-up! (invulnerable)")
+                            player.power_up = 'invulnerable/5hp'
                     grid[player.row][player.col] = FLOOR
                 show_status()
                 if (player.row, player.col) == exit_pos:
@@ -374,16 +372,13 @@ def main() -> None:
                     return
                 if move == "u":
                     if player.power_up and not powerup_used_this_turn:
-                        if player.power_up == 'extra_move':
-                            move_limit += 2
-                        elif player.power_up == 'invulnerable':
+                        if player.power_up == 'time_stop':
+                            move_limit += 200
+                        elif player.power_up == 'invulnerable/5hp':
                             player.invulnerable = True
-                            print("Power-up used: Invulnerable for this turn!")
+                            player.hp += 5
                         player.power_up = None
                         powerup_used_this_turn = True
-                        show_status()
-                    elif not player.power_up:
-                        print("No power-up to use.")
                         show_status()
                     i += 1
                     continue
@@ -450,7 +445,7 @@ def main() -> None:
                     if monster.hp != -1:
                         monsters_to_kill.append(monster)
             for monster in monsters_to_kill:
-                if random.random() < 0.5:
+                if random.random() < 0.8:
                     monster.hp = 0
                     score += 1
             player.predicted_attack = False
